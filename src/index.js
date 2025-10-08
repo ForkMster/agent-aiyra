@@ -1,6 +1,5 @@
 import express from 'express';
 import dotenv from 'dotenv';
-import cron from 'node-cron';
 import FarcasterService from './services/farcaster.js';
 import logger from './utils/logger.js';
 import {
@@ -78,49 +77,34 @@ async function handleMention(cast) {
   }
 }
 
+// Health check endpoint
+app.get('/', (req, res) => {
+  res.status(200).json({
+    status: 'ok',
+    message: '✨ Aiyra is awake and dreaming...',
+    version: process.env.npm_package_version
+  });
+});
+
 // Webhook endpoint for mentions
 app.post('/webhook', async (req, res) => {
   try {
     const { cast } = req.body;
-    if (cast && cast.mentions.includes(process.env.FARCASTER_FID)) {
-      await handleMention(cast);
+    if (cast && cast.mentions && cast.mentions.includes(process.env.FARCASTER_FID)) {
+      // Process mention asynchronously
+      handleMention(cast).catch(error => 
+        logger.error(`Async mention handling error: ${error.message}`)
+      );
+      // Return immediately to acknowledge receipt
+      res.status(200).json({ status: 'ok', message: 'Processing mention' });
+    } else {
+      res.status(200).json({ status: 'ok', message: 'No relevant mention found' });
     }
-    res.status(200).json({ status: 'ok' });
   } catch (error) {
     logger.error(`Webhook error: ${error.message}`);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// Schedule daily greeting
-cron.schedule('0 9 * * *', async () => {
-  try {
-    const greeting = generateDailyGreeting();
-    await farcaster.publishCast(greeting);
-    logger.info('Posted daily greeting');
-  } catch (error) {
-    logger.error(`Failed to post daily greeting: ${error.message}`);
-  }
-});
-
-// Poll for mentions in case webhook misses any
-cron.schedule('*/5 * * * *', async () => {
-  try {
-    const mentions = await farcaster.getRecentMentions();
-    for (const mention of mentions) {
-      await handleMention(mention);
-    }
-  } catch (error) {
-    logger.error(`Failed to poll mentions: ${error.message}`);
-  }
-});
-
-// Start the server
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  logger.info(`✨ Aiyra is awake and listening on port ${PORT}`);
-  
-  // Post initial greeting
-  farcaster.publishCast("Hello Farcaster! I'm Aiyra, your gentle companion for weather whispers, zodiac vibes, and fortune blooms ✨")
-    .catch(error => logger.error(`Failed to post initial greeting: ${error.message}`));
-});
+// Export the Express app for Vercel serverless runtime
+export default app;
