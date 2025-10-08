@@ -17,6 +17,10 @@
       "dest": "src/index.js"
     }
   ],
+  "crons": [
+    { "path": "/poll", "schedule": "*/2 * * * *" },
+    { "path": "/keepalive", "schedule": "*/2 * * * *" }
+  ],
   "env": {
     "NODE_ENV": "production"
   }
