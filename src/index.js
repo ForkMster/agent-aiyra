@@ -90,7 +90,8 @@ app.get('/', (req, res) => {
 app.post('/webhook', async (req, res) => {
   try {
     const { cast } = req.body;
-    if (cast && cast.mentions && cast.mentions.includes(process.env.FARCASTER_FID)) {
+    const fid = Number(process.env.FARCASTER_FID);
+    if (cast && cast.mentions && cast.mentions.includes(fid)) {
       // Process mention asynchronously
       handleMention(cast).catch(error => 
         logger.error(`Async mention handling error: ${error.message}`)
