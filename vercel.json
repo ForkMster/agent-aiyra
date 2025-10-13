@@ -1,27 +1,18 @@
 {
   "version": 2,
   "builds": [
-    {
-      "src": "src/index.js",
-      "use": "@vercel/node"
-    }
+    { "src": "src/index.js", "use": "@vercel/node" }
   ],
   "routes": [
-    {
-      "src": "/webhook",
-      "dest": "src/index.js",
-      "methods": ["POST"]
-    },
-    {
-      "src": "/(.*)",
-      "dest": "src/index.js"
-    }
+    { "src": "/env", "dest": "src/index.js" },
+    { "src": "/test-reply", "dest": "src/index.js" },
+    { "src": "/logs", "dest": "src/index.js" },
+    { "src": "/poll", "dest": "src/index.js" },
+    { "src": "/keepalive", "dest": "src/index.js" },
+    { "src": "/(.*)", "dest": "src/index.js" }
   ],
   "crons": [
-    { "path": "/poll", "schedule": "*/2 * * * *" },
-    { "path": "/keepalive", "schedule": "*/2 * * * *" }
-  ],
-  "env": {
-    "NODE_ENV": "production"
-  }
+    { "path": "/keepalive", "schedule": "*/5 * * * *" },
+    { "path": "/poll", "schedule": "*/1 * * * *" }
+  ]
 }

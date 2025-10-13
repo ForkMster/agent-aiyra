@@ -5,12 +5,14 @@
   "main": "src/index.js",
   "type": "module",
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.0.0"
   },
   "scripts": {
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
-    "vercel-build": "echo 'Build step completed'"
+    "vercel-build": "echo 'Build step completed'",
+    "test:reply": "node scripts/test-reply.js",
+    "setup:webhook": "node scripts/setup-webhook.js"
   },
   "keywords": ["farcaster", "ai", "agent"],
   "author": "",
@@ -20,7 +22,8 @@
     "express": "^4.18.2",
     "axios": "^1.6.7",
     "dotenv": "^16.4.1",
-    "winston": "^3.11.0"
+    "winston": "^3.11.0",
+    "@upstash/redis": "^1.28.2"
   },
   "devDependencies": {
     "nodemon": "^3.0.3"

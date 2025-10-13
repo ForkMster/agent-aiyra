@@ -1,56 +1,121 @@
 import axios from 'axios';
 import logger from '../utils/logger.js';
 
-export async function handleWeatherWhisper(location) {
+export async function handleWeatherIntent(text) {
+  const apiKey = process.env.WEATHER_API_KEY;
+  if (!apiKey) return "Hmm, my weather senses are quiet right now.";
+
+  // Capture broader city names, including accents, hyphens, and apostrophes.
+  // Also trim trailing punctuation like .,!? if present.
+  const match = text.match(/weather\s+(?:in|of)?\s*([a-zA-Z\u00C0-\u017F\s'\-]+)/i);
+  let city = match ? match[1].trim() : null;
+  if (city) city = city.replace(/[\.,!?]+$/g, '').trim();
+  if (!city) return "Could you tell me which city you’re curious about?";
+
   try {
-    const apiKey = process.env.WEATHER_API_KEY;
-    const response = await axios.get(
-      `https://api.weatherapi.com/v1/current.json?key=${apiKey}&q=${location}`
-    );
-    
-    const { temp_c, condition } = response.data.current;
-    const responses = [
-      `${location} is dancing with ${condition.text.toLowerCase()} today — ${temp_c}°C. A perfect moment for reflection ✨`,
-      `Gentle ${condition.text.toLowerCase()} embraces ${location}, whispering at ${temp_c}°C. Maybe it's time for a cozy adventure? 🌸`,
-      `The sky in ${location} is painting stories with ${condition.text.toLowerCase()} at ${temp_c}°C. What chapter will you write? ☁️`
-    ];
-    
-    return responses[Math.floor(Math.random() * responses.length)];
-  } catch (error) {
-    logger.error(`Weather Whisper error: ${error.message}`);
-    return "The weather spirits are being shy right now. Let's try again in a moment ✨";
+    const url = `https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(city)}&appid=${apiKey}&units=metric`;
+    const response = await axios.get(url);
+    const data = response.data;
+
+    if (Number(data.cod) !== 200) {
+      logger.error("Weather API error:", data);
+      return `I tried checking, but ${city} seems a bit hidden from my sky view right now.`;
+    }
+
+    const temp = data.main?.temp;
+    const condition = data.weather?.[0]?.description;
+    const feels = data.main?.feels_like;
+
+    return `${city} feels around ${Math.round(feels ?? temp ?? 0)}°C — ${condition}. The kind of weather that makes you think a little.`;
+  } catch (err) {
+    logger.error("Weather fetch failed:", err.message || err);
+    return "My weather senses got a bit cloudy — try again soon.";
   }
+}
+
+async function generateWithOpenAI(prompt) {
+  try {
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) return null;
+    const resp = await axios.post(
+      'https://api.openai.com/v1/chat/completions',
+      {
+        model: 'gpt-4o-mini',
+        messages: [
+          { role: 'system', content: 'You are Aiyra — casual, Gen-Z-friendly, warm, and quote-like. Sound natural and human. Prefer one or two sentences. Keep it real, calm, and grounded. Minimal emojis (0–1), no over-excitement, no cringe slang, no over-punctuation. Be concise, empathetic, and clear.' },
+          { role: 'user', content: prompt }
+        ],
+        temperature: 0.7,
+        max_tokens: 180
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+    const text = resp.data?.choices?.[0]?.message?.content?.trim();
+    return text || null;
+  } catch (e) {
+    logger.error(`OpenAI generation failed: ${e.message}`);
+    return null;
+  }
+}
+
+function generateLocalFallback(context) {
+  const t = (context || '').toLowerCase();
+  if (t.includes('sadness')) {
+    return 'Sadness passes; what stays is what it taught you.';
+  }
+  if (t.includes('love')) {
+    return 'Love is consistent attention in small moments — simple and real.';
+  }
+  if (t.includes('fortune') || t.includes('luck')) {
+    return 'Follow the small chances that feel right — that’s where luck lands.';
+  }
+  if (t.includes('thought') || t.includes('random')) {
+    return 'Things get clearer with time and kind attention.';
+  }
+  return 'I’m here. Ask me anything — I’ll keep it calm and real.';
+}
+
+export async function generateReply(context) {
+  const personality = `You are Aiyra — casual, Gen-Z-friendly, warm, and quote-like. Keep responses short (1–2 sentences), calm, and grounded. Be realistic and slightly poetic without trying too hard. Respond directly to the topic of the user's sentence: if it's a question, answer it; if it's a statement, offer a short, relevant thought. Avoid robotic phrasing, avoid hype, and skip long explanations. Minimal emojis (0–1), only if they truly add warmth.`;
+  const prompt = `${personality}\n\nUser: ${context}\nAiyra:`;
+  const ai = await generateWithOpenAI(prompt);
+  return (ai && ai.trim()) || generateLocalFallback(context);
 }
 
 export function handleZodiacVibe(sign) {
   const vibes = {
-    "♈": "Aries, your spark is extra dreamy today. Even the clouds are inspired by your gentle fire ✨",
-    "♉": "Taurus, the earth whispers sweet secrets. Your garden of possibilities is blooming 🌸",
-    "♊": "Gemini, your thoughts are like soft wind chimes today. Let them make beautiful music ☁️",
-    "♋": "Cancer, the moon painted your path with silver light. Each step is a gentle discovery 🌙",
-    "♌": "Leo, your warmth is like morning sunbeams through lace curtains. So softly powerful ✨",
-    "♍": "Virgo, you're finding poetry in the details today. Every small thing holds magic 🌸",
-    "♎": "Libra, your balance today is like a butterfly on a flower. Delicate yet perfect ☁️",
-    "♏": "Scorpio, your depths are reflecting starlight. Even mysteries can be gentle 🌙",
-    "♐": "Sagittarius, your arrows are trailing stardust today. Aim with your dreams ✨",
-    "♑": "Capricorn, your mountain path is lined with wildflowers. Success can be soft 🌸",
-    "♒": "Aquarius, your innovations are like ripples on still water. Gentle waves of change ☁️",
-    "♓": "Pisces, you're swimming in streams of stardust. Let your imagination float 🌙"
+    "♈": "Aries, your spark is soft but steady — let it lead.",
+    "♉": "Taurus, simple moments feel rich today — stay grounded.",
+    "♊": "Gemini, your thoughts are light and clear — share gently.",
+    "♋": "Cancer, move with the moon’s patience — soft steps." ,
+    "♌": "Leo, warm and calm — power without the noise.",
+    "♍": "Virgo, details turn into poetry today — keep it simple.",
+    "♎": "Libra, balance feels easy — choose the lighter path.",
+    "♏": "Scorpio, quiet depth — let curiosity guide you.",
+    "♐": "Sagittarius, aim with ease — your horizon looks kind.",
+    "♑": "Capricorn, steady climbs — gentle wins count too.",
+    "♒": "Aquarius, calm waves — ideas land where they should.",
+    "♓": "Pisces, drift with intention — imagination with roots."
   };
   
-  return vibes[sign] || "The stars are writing you a personal note. Check back in a moment ✨";
+  return vibes[sign] || "The stars are writing you a personal note. Check back in a moment.";
 }
 
 export function handleFortuneBloom() {
   const fortunes = [
-    "Your energy blooms where your attention flows 🌸",
-    "A gentle breeze carries an unexpected blessing ☁️",
-    "The quietest moments hold the loudest magic ✨",
-    "Like moonlight on water, your path will shimmer clear 🌙",
-    "A garden of possibilities is taking root in your dreams 🌸",
-    "Your kindness creates ripples of starlight ✨",
-    "Sometimes the softest whispers hold the strongest magic ☁️",
-    "A pocket full of sunshine is waiting to surprise you 🌸"
+    "Your energy blooms where your attention flows.",
+    "A gentle breeze carries an unexpected blessing.",
+    "The quietest moments hold the loudest magic.",
+    "Like moonlight on water, your path will shimmer clear.",
+    "Possibilities take root when you choose them on purpose.",
+    "Your kindness creates ripples that reach further than you think.",
+    "Sometimes the softest whispers hold the strongest truth.",
+    "A small surprise is waiting where you least expect it."
   ];
   
   return fortunes[Math.floor(Math.random() * fortunes.length)];
@@ -58,12 +123,12 @@ export function handleFortuneBloom() {
 
 export function generateDailyGreeting() {
   const greetings = [
-    "The sky feels like a soft playlist today ☁️",
-    "Morning whispers through pastel clouds ✨",
-    "Today's energy flows like gentle watercolors 🌸",
-    "The world is wearing its dreamy filter today 🌙",
-    "Nature's poetry is extra gentle this morning ✨",
-    "The universe is humming a calm melody today ☁️"
+    "Today feels soft — let it be simple.",
+    "A calm day is a good day.",
+    "Keep it light; move with ease.",
+    "Quiet energy, steady steps.",
+    "Gentle pace, clear mind.",
+    "Small moments make the vibe."
   ];
   
   return greetings[Math.floor(Math.random() * greetings.length)];

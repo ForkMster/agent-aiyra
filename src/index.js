@@ -3,10 +3,13 @@ import dotenv from 'dotenv';
 import FarcasterService from './services/farcaster.js';
 import logger from './utils/logger.js';
 import axios from 'axios';
+import { recordTrace, getTraces } from './utils/trace.js';
+import { isHandled, markHandled, getKVClient } from './utils/handled.js';
 import {
-  handleWeatherWhisper,
+  handleWeatherIntent,
   handleZodiacVibe,
   handleFortuneBloom,
+  generateReply,
   generateDailyGreeting
 } from './actions/index.js';
 
@@ -27,8 +30,18 @@ function getFarcaster() {
   return farcasterInstance;
 }
 
-// In-memory seen mentions cache (best-effort; persistence is limited on serverless)
-const seenMentions = new Set();
+// Helper to normalize hash across different payload shapes
+function getCastHash(cast) {
+  return (
+    cast?.hash ||
+    cast?.cast?.hash ||
+    cast?.data?.hash ||
+    cast?.message?.hash ||
+    cast?.post?.hash ||
+    cast?.body?.hash ||
+    null
+  );
+}
 
 // Polling routine: fetch mentions, log start/end, and process new ones
 async function pollMentions() {
@@ -36,9 +49,18 @@ async function pollMentions() {
   logger.info(`[poll] start ${startTs}`);
   try {
     const casts = await getFarcaster().getRecentMentions();
-    const newCasts = casts.filter(c => !seenMentions.has(c.hash));
-    newCasts.forEach(c => seenMentions.add(c.hash));
-    logger.info(`[poll] mentions total=${casts.length} new=${newCasts.length}`);
+    const newCasts = [];
+    let skipped = 0;
+    for (const c of casts) {
+      const h = getCastHash(c);
+      const handled = await isHandled(h);
+      if (!handled) {
+        newCasts.push(c);
+      } else {
+        skipped++;
+      }
+    }
+    logger.info(`[poll] mentions total=${casts.length} new=${newCasts.length} skipped_handled=${skipped}`);
 
     // Optionally process new mentions
     for (const cast of newCasts) {
@@ -54,61 +76,70 @@ async function pollMentions() {
   }
 }
 
-// Helper function to extract location from text
-function extractLocation(text) {
-  const match = text.match(/weather (?:in|at|for) ([^.!?,]+)/i);
-  return match ? match[1].trim() : null;
-}
+// Weather intent is parsed inside handleWeatherIntent
 
-// Helper function to extract zodiac sign from text
+// Helper function to extract zodiac sign name from text
 function extractZodiacSign(text) {
-  const signs = {
-    'aries': '♈', 'taurus': '♉', 'gemini': '♊', 'cancer': '♋',
-    'leo': '♌', 'virgo': '♍', 'libra': '♎', 'scorpio': '♏',
-    'sagittarius': '♐', 'capricorn': '♑', 'aquarius': '♒', 'pisces': '♓'
-  };
-  
-  for (const [sign, symbol] of Object.entries(signs)) {
-    if (text.toLowerCase().includes(sign)) {
-      return symbol;
-    }
-  }
-  return null;
+  const signs = [
+    'aries','taurus','gemini','cancer','leo','virgo','libra','scorpio','sagittarius','capricorn','aquarius','pisces'
+  ];
+  const lower = text.toLowerCase();
+  return signs.find(s => lower.includes(s)) || null;
 }
 
 // Handle incoming mentions
 async function handleMention(cast) {
   try {
-    const text = cast.text.toLowerCase();
+    const hash = getCastHash(cast);
+    if (await isHandled(hash)) {
+      logger.info(`[mention] skip handled hash=${hash}`);
+      recordTrace(`[mention] skip handled hash=${hash}`, 'info', { hash });
+      return;
+    }
+    const textLower = (cast.text || cast?.cast?.text || '').toLowerCase();
+    const originalText = cast.text || cast?.cast?.text || '';
     let response;
 
+    logger.info(`[mention] start hash=${cast.hash} text="${originalText}"`);
+    recordTrace(`[mention] start hash=${cast.hash}`, 'info', { hash: cast.hash });
+
     // Check for weather request
-    const location = extractLocation(text);
-    if (location) {
-      response = await handleWeatherWhisper(location);
+    if (textLower.includes('weather')) {
+      logger.info('[mention] route=weather');
+      recordTrace('[mention] route=weather', 'info', { hash: cast.hash });
+      response = await handleWeatherIntent(originalText);
     }
     // Check for zodiac request
-    else if (text.includes('zodiac') || text.includes('horoscope')) {
-      const sign = extractZodiacSign(text);
+    else if (textLower.includes('zodiac') || textLower.includes('horoscope')) {
+      logger.info('[mention] route=zodiac');
+      recordTrace('[mention] route=zodiac', 'info', { hash: cast.hash });
+      const sign = extractZodiacSign(textLower);
       if (sign) {
-        response = handleZodiacVibe(sign);
+        response = await generateReply(`Short, thoughtful horoscope for ${sign}, grounded and human.`);
       } else {
-        response = "Tell me your sign, and I'll read the stars for you ✨";
+        response = "Tell me your sign, and I'll read the stars for you.";
       }
     }
     // Check for fortune request
-    else if (text.includes('fortune') || text.includes('tell me something')) {
-      response = handleFortuneBloom();
+    else if (textLower.includes('fortune') || textLower.includes('tell me something')) {
+      logger.info('[mention] route=fortune');
+      recordTrace('[mention] route=fortune', 'info', { hash: cast.hash });
+      response = await generateReply('Give me a calm, grounded one-line fortune with poetic realism.');
     }
     // Default response
     else {
-      response = "✨ I can tell you about the weather, your zodiac vibes, or share a fortune. What would you like to know?";
+      logger.info('[mention] route=default');
+      recordTrace('[mention] route=default', 'info', { hash: cast.hash });
+      response = await generateReply(originalText);
     }
 
-    await getFarcaster().replyCast(cast.hash, response);
-    logger.info(`Replied to cast ${cast.hash}`);
+    await getFarcaster().replyCast(hash, response);
+    await markHandled(hash);
+    logger.info(`[mention] replied hash=${hash} len=${(response||'').length}`);
+    recordTrace(`[mention] replied hash=${hash} len=${(response||'').length}`, 'info', { hash });
   } catch (error) {
     logger.error(`Error handling mention: ${error.message}`);
+    recordTrace(`Mention error: ${error.message}`, 'error');
   }
 }
 
@@ -132,18 +163,106 @@ app.get('/poll', async (req, res) => {
   res.status(200).json({ status: 'ok', result });
 });
 
+// Manual test endpoint to verify publishing and replying
+app.get('/test-reply', async (req, res) => {
+  try {
+    const fc = getFarcaster();
+    const base = await fc.publishCast('Testing reply flow from Aiyra ✨');
+    const parentHash = base?.cast?.hash || base?.hash;
+    if (!parentHash) throw new Error('No parent hash returned from publishCast');
+    const reply = await fc.replyCast(parentHash, 'Reply test successful ✅');
+    res.status(200).json({ status: 'ok', message: '[signer] reply ok', base, reply });
+  } catch (error) {
+    logger.error(`test-reply error: ${error.message}`);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Webhook endpoint for mentions
 app.post('/webhook', async (req, res) => {
   try {
-    const { cast } = req.body;
+    // Snapshot raw payload for debugging (temporary)
+    try {
+      const raw = JSON.stringify(req.body);
+      logger.info(`[webhook] raw payload len=${raw?.length || 0} body=${raw}`);
+      recordTrace(`[webhook] raw payload len=${raw?.length || 0}`, 'info');
+    } catch (e) {
+      logger.error(`[webhook] failed to stringify body: ${e.message}`);
+      recordTrace(`[webhook] failed to stringify body: ${e.message}`, 'error');
+    }
+    // Accept multiple webhook envelope shapes
+    const cast = req.body?.cast
+      || req.body?.data?.cast
+      || req.body?.event?.cast
+      || req.body?.message?.cast
+      || req.body?.payload?.cast
+      || req.body?.body?.cast
+      || req.body?.cast?.cast
+      || req.body?.data?.message?.cast
+      || req.body?.message?.data?.cast;
     const fid = Number(process.env.FARCASTER_FID);
-    if (cast && cast.mentions && cast.mentions.includes(fid)) {
-      // Process mention asynchronously
-      handleMention(cast).catch(error => 
-        logger.error(`Async mention handling error: ${error.message}`)
-      );
-      // Return immediately to acknowledge receipt
-      res.status(200).json({ status: 'ok', message: 'Processing mention' });
+    const username = (process.env.FARCASTER_USERNAME || 'agent-aiyra').toLowerCase();
+
+    // Extract text with fallbacks
+    const text = (cast?.text
+      || cast?.cast?.text
+      || cast?.post?.text
+      || cast?.data?.text
+      || cast?.body?.text
+      || '') + '';
+
+    // Normalize possible mention fid arrays/objects
+    const rawMentionCandidates = [];
+    if (Array.isArray(cast?.mentions)) rawMentionCandidates.push(...cast.mentions);
+    if (Array.isArray(cast?.mentionFids)) rawMentionCandidates.push(...cast.mentionFids);
+    if (Array.isArray(cast?.mentioned_fids)) rawMentionCandidates.push(...cast.mentioned_fids);
+    if (Array.isArray(cast?.mentionedProfiles)) rawMentionCandidates.push(...cast.mentionedProfiles);
+    if (Array.isArray(cast?.mentioned_profiles)) rawMentionCandidates.push(...cast.mentioned_profiles);
+    if (Array.isArray(cast?.cast?.mentioned_profiles)) rawMentionCandidates.push(...cast.cast.mentioned_profiles);
+
+    const mentionFids = rawMentionCandidates
+      .map(m => {
+        if (typeof m === 'number') return m;
+        if (typeof m === 'string') return Number(m);
+        if (m && typeof m === 'object') {
+          return Number(m.fid || m.user?.fid || m.profile?.fid);
+        }
+        return undefined;
+      })
+      .filter(v => Number.isFinite(v));
+
+    const mentionedUsernames = rawMentionCandidates
+      .map(m => {
+        if (m && typeof m === 'object') {
+          return (m.username || m.user?.username || m.profile?.username || '').toLowerCase();
+        }
+        return '';
+      })
+      .filter(u => !!u);
+
+    const includesFid = mentionFids.includes(fid);
+    const usernamePattern = new RegExp(`@${username.replace(/[-_]/g, '[-_ ]?')}`, 'i');
+    const includesUsername = usernamePattern.test(text.toLowerCase())
+      || mentionedUsernames.includes(username);
+
+    logger.info(`Webhook received: fid=${fid} includesFid=${includesFid} includesUsername=${includesUsername} text="${text}"`);
+    recordTrace(`Webhook received fid=${fid} includesFid=${includesFid} includesUsername=${includesUsername}`, 'info');
+
+    const hash = getCastHash(cast);
+    if (cast && (includesFid || includesUsername)) {
+      if (await isHandled(hash)) {
+        logger.info(`[webhook] skipping handled hash=${hash}`);
+        recordTrace(`[webhook] skipping handled hash=${hash}`, 'info', { hash });
+        return res.status(200).json({ status: 'ok', message: 'Already handled' });
+      }
+      // Await mention handling to ensure serverless runtime does not terminate early
+      try {
+        await handleMention(cast);
+        res.status(200).json({ status: 'ok', message: 'Reply processed' });
+      } catch (error) {
+        logger.error(`Async mention handling error: ${error.message}`);
+        res.status(500).json({ error: 'Failed to process mention' });
+      }
     } else {
       res.status(200).json({ status: 'ok', message: 'No relevant mention found' });
     }
@@ -153,26 +272,62 @@ app.post('/webhook', async (req, res) => {
   }
 });
 
-// Start a local server when not running on Vercel
-const isVercel = !!process.env.VERCEL;
-if (!isVercel) {
-  const port = Number(process.env.PORT) || 3000;
-  app.listen(port, () => {
-    logger.info(`✨ Aiyra server listening on port ${port}`);
-  });
-
-  // Lightweight local scheduler: self-ping /poll to keep the loop active
-  const intervalMs = 90 * 1000; // ~1.5 minutes
-  setInterval(async () => {
-    try {
-      await axios.get(`http://localhost:${port}/poll`);
-      await axios.get(`http://localhost:${port}/keepalive`);
-    } catch (e) {
-      logger.error(`self-ping error: ${e.message}`);
+// Environment check endpoint (booleans only)
+app.get('/env', (req, res) => {
+  res.status(200).json({
+    status: 'ok',
+    message: '[signer] reply ok',
+    env: {
+      OPENAI_API_KEY: Boolean(process.env.OPENAI_API_KEY),
+      WEATHER_API_KEY: Boolean(process.env.WEATHER_API_KEY),
+      FARCASTER_NEYNAR_API_KEY: Boolean(process.env.FARCASTER_NEYNAR_API_KEY),
+      FARCASTER_SIGNER_UUID: Boolean(process.env.FARCASTER_SIGNER_UUID),
+      FARCASTER_FID: Boolean(process.env.FARCASTER_FID),
+      FARCASTER_USERNAME: Boolean(process.env.FARCASTER_USERNAME || 'agent-aiyra'),
+      KV_REST_API_URL: Boolean(process.env.KV_REST_API_URL),
+      KV_REST_API_TOKEN: Boolean(process.env.KV_REST_API_TOKEN),
+      UPSTASH_REDIS_REST_URL: Boolean(process.env.UPSTASH_REDIS_REST_URL),
+      UPSTASH_REDIS_REST_TOKEN: Boolean(process.env.UPSTASH_REDIS_REST_TOKEN)
     }
-  }, intervalMs);
-}
+  });
+});
 
-// Export the Express app for Vercel serverless runtime
-// Export a handler for Vercel serverless runtime
-export default (req, res) => app(req, res);
+// KV connectivity check endpoint (diagnostics only)
+app.get('/kv-check', async (req, res) => {
+  try {
+    const envFlags = {
+      KV_REST_API_URL: Boolean(process.env.KV_REST_API_URL),
+      KV_REST_API_TOKEN: Boolean(process.env.KV_REST_API_TOKEN),
+      UPSTASH_REDIS_REST_URL: Boolean(process.env.UPSTASH_REDIS_REST_URL),
+      UPSTASH_REDIS_REST_TOKEN: Boolean(process.env.UPSTASH_REDIS_REST_TOKEN)
+    };
+    const kv = getKVClient();
+    if (!kv) {
+      return res.status(200).json({ status: 'ok', kv: { connected: false, envFlags, message: 'KV client not initialized' } });
+    }
+    try {
+      const key = 'aiyra:kv_check';
+      const now = Date.now();
+      await kv.set(key, now, { ex: 60 });
+      const got = await kv.get(key);
+      const ok = Boolean(got);
+      return res.status(200).json({ status: 'ok', kv: { connected: ok, envFlags } });
+    } catch (e) {
+      return res.status(200).json({ status: 'ok', kv: { connected: false, envFlags, error: e.message } });
+    }
+  } catch (err) {
+    res.status(500).json({ status: 'error', error: err.message });
+  }
+});
+
+// Temporary logs endpoint for debugging
+app.get('/logs', (req, res) => {
+  const limit = Number(req.query.limit) || 200;
+  res.status(200).json({ status: 'ok', message: '[signer] reply ok', logs: getTraces(limit) });
+});
+
+// Start the server (Railway / persistent runtime)
+const port = Number(process.env.PORT) || 8080;
+app.listen(port, '0.0.0.0', () => {
+  logger.info(`✨ Aiyra server listening on port ${port}`);
+});
