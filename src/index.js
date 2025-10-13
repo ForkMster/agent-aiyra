@@ -395,4 +395,32 @@ app.get('/logs', (req, res) => {
 const port = Number(process.env.PORT) || 8080;
 app.listen(port, '0.0.0.0', () => {
   logger.info(`✨ Aiyra server listening on port ${port}`);
+  // Background polling loop (Keep-Alive Worker Mode)
+  try {
+    const disable = String(process.env.POLL_DISABLE || '').toLowerCase() === 'true';
+    const intervalMs = Number(process.env.POLL_INTERVAL_MS || (5 * 60 * 1000));
+    if (!disable && Number.isFinite(intervalMs) && intervalMs > 0) {
+      logger.info(`[bg] background polling enabled interval_ms=${intervalMs}`);
+      recordTrace(`[bg] background polling enabled interval_ms=${intervalMs}`, 'info');
+      let polling = false;
+      setInterval(async () => {
+        if (polling) return;
+        polling = true;
+        try {
+          await pollMentions();
+        } catch (e) {
+          logger.error(`[bg] poll error: ${e.message}`);
+          recordTrace(`[bg] poll error: ${e.message}`, 'error');
+        } finally {
+          polling = false;
+        }
+      }, intervalMs);
+    } else {
+      logger.info(`[bg] background polling disabled`);
+      recordTrace(`[bg] background polling disabled`, 'info');
+    }
+  } catch (e) {
+    logger.error(`[bg] init error: ${e.message}`);
+    recordTrace(`[bg] init error: ${e.message}`, 'error');
+  }
 });
