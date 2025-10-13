@@ -4,7 +4,7 @@ import FarcasterService from './services/farcaster.js';
 import logger from './utils/logger.js';
 import axios from 'axios';
 import { recordTrace, getTraces } from './utils/trace.js';
-import { isHandled, markHandled, getKVClient, getLastProcessedTS, setLastProcessedTS, getLastPollTS, setLastPollTS } from './utils/handled.js';
+import { isHandled, markHandled, getKVClient, getLastProcessedTS, setLastProcessedTS, getLastPollTS, setLastPollTS, getPollIntervalOverride, setPollIntervalOverride, clearPollIntervalOverride } from './utils/handled.js';
 import {
   handleWeatherIntent,
   handleZodiacVibe,
@@ -409,32 +409,108 @@ app.get('/logs', (req, res) => {
 const port = Number(process.env.PORT) || 8080;
 app.listen(port, '0.0.0.0', () => {
   logger.info(`✨ Aiyra server listening on port ${port}`);
-  // Background polling loop (Keep-Alive Worker Mode)
-  try {
-    const disable = String(process.env.POLL_DISABLE || '').toLowerCase() === 'true';
-    const intervalMs = Number(process.env.POLL_INTERVAL_MS || (5 * 60 * 1000));
-    if (!disable && Number.isFinite(intervalMs) && intervalMs > 0) {
-      logger.info(`[bg] background polling enabled interval_ms=${intervalMs}`);
-      recordTrace(`[bg] background polling enabled interval_ms=${intervalMs}`, 'info');
-      let polling = false;
+  // Initialize background poller and watch for KV override changes
+  (async () => {
+    try {
+      await startOrUpdateBackgroundTimer();
+      // Check override every 60s and adjust interval if changed
       setInterval(async () => {
-        if (polling) return;
-        polling = true;
-        try {
-          await pollMentions();
-        } catch (e) {
-          logger.error(`[bg] poll error: ${e.message}`);
-          recordTrace(`[bg] poll error: ${e.message}`, 'error');
-        } finally {
-          polling = false;
-        }
-      }, intervalMs);
-    } else {
-      logger.info(`[bg] background polling disabled`);
-      recordTrace(`[bg] background polling disabled`, 'info');
+        try { await startOrUpdateBackgroundTimer(); } catch (_) {}
+      }, 60 * 1000);
+    } catch (e) {
+      logger.error(`[bg] init error: ${e.message}`);
+      recordTrace(`[bg] init error: ${e.message}`, 'error');
     }
-  } catch (e) {
-    logger.error(`[bg] init error: ${e.message}`);
-    recordTrace(`[bg] init error: ${e.message}`, 'error');
+  })();
+});
+
+// Admin: view current and effective poll interval
+app.get('/admin/poll-interval', async (req, res) => {
+  try {
+    const override = await getPollIntervalOverride();
+    const effective = await getEffectiveIntervalMs();
+    res.status(200).json({ status: 'ok', interval: { overrideMs: override, effectiveMs: effective, envDefaultMs: BG_ENV_INTERVAL_MS } });
+  } catch (err) {
+    res.status(500).json({ status: 'error', error: err.message });
   }
 });
+
+// Admin: update poll interval override (requires ADMIN_TOKEN)
+app.post('/admin/poll-interval', async (req, res) => {
+  try {
+    const required = String(process.env.ADMIN_TOKEN || '').trim();
+    const provided = String(req.headers['x-admin-token'] || req.query.token || (req.body ? req.body.token : '') || '').trim();
+    if (!required || !provided || required !== provided) {
+      return res.status(403).json({ status: 'forbidden', message: 'Invalid admin token' });
+    }
+    const raw = (req.body && (req.body.ms ?? req.body.intervalMs)) ?? req.query.ms ?? req.query.intervalMs;
+    const s = String(raw || '').trim().toLowerCase();
+    if (!s || s === 'clear' || s === '0') {
+      await clearPollIntervalOverride();
+      await startOrUpdateBackgroundTimer();
+      const effective = await getEffectiveIntervalMs();
+      recordTrace('[admin] cleared poll interval override', 'info');
+      return res.status(200).json({ status: 'ok', interval: { overrideMs: null, effectiveMs: effective } });
+    }
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n <= 0) {
+      return res.status(400).json({ status: 'error', message: 'Invalid interval ms' });
+    }
+    await setPollIntervalOverride(n);
+    await startOrUpdateBackgroundTimer();
+    const effective = await getEffectiveIntervalMs();
+    recordTrace(`[admin] set poll interval override ms=${n}`, 'info');
+    res.status(200).json({ status: 'ok', interval: { overrideMs: n, effectiveMs: effective } });
+  } catch (err) {
+    res.status(500).json({ status: 'error', error: err.message });
+  }
+});
+// Background poll manager (supports hot-reload interval override via KV)
+let BG_DISABLE = String(process.env.POLL_DISABLE || '').toLowerCase() === 'true';
+let BG_MIN_INTERVAL_MS = Number(process.env.MIN_POLL_INTERVAL_MS || (60 * 1000));
+let BG_MAX_INTERVAL_MS = Number(process.env.MAX_POLL_INTERVAL_MS || (60 * 60 * 1000));
+let BG_ENV_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS || (5 * 60 * 1000));
+let bgPolling = false;
+let bgTimer = null;
+let bgIntervalMs = null;
+
+function clampInterval(ms) {
+  const n = Number(ms);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return Math.max(BG_MIN_INTERVAL_MS, Math.min(n, BG_MAX_INTERVAL_MS));
+}
+
+async function getEffectiveIntervalMs() {
+  const override = await getPollIntervalOverride();
+  const base = Number.isFinite(override) ? override : BG_ENV_INTERVAL_MS;
+  const clamped = clampInterval(base);
+  return clamped || BG_ENV_INTERVAL_MS;
+}
+
+async function startOrUpdateBackgroundTimer() {
+  if (BG_DISABLE) {
+    logger.info('[bg] background polling disabled');
+    recordTrace('[bg] background polling disabled', 'info');
+    if (bgTimer) { clearInterval(bgTimer); bgTimer = null; }
+    return;
+  }
+  const desired = await getEffectiveIntervalMs();
+  if (!Number.isFinite(desired) || desired <= 0) return;
+  if (bgTimer && bgIntervalMs === desired) return;
+  if (bgTimer) clearInterval(bgTimer);
+  bgIntervalMs = desired;
+  logger.info(`[bg] polling interval set to ${bgIntervalMs}ms`);
+  recordTrace(`[bg] polling interval set to ${bgIntervalMs}ms`, 'info');
+  bgTimer = setInterval(async () => {
+    if (bgPolling) return;
+    bgPolling = true;
+    try {
+      await pollMentions();
+    } catch (e) {
+      logger.error(`[bg] poll error: ${e.message}`);
+      recordTrace(`[bg] poll error: ${e.message}`, 'error');
+    } finally {
+      bgPolling = false;
+    }
+  }, bgIntervalMs);
+}

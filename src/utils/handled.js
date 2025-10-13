@@ -22,6 +22,7 @@ const TTL_MS = Number(process.env.HANDLED_TTL_MS || (14 * 24 * 60 * 60 * 1000));
 const TTL_SECONDS = Math.floor(TTL_MS / 1000);
 const LAST_PROCESSED_TS_KEY = process.env.HANDLED_LAST_TS_KEY || 'aiyra:last_cast_ts';
 const LAST_POLL_TS_KEY = process.env.HANDLED_LAST_POLL_TS_KEY || 'aiyra:last_poll_ts';
+const POLL_INTERVAL_OVERRIDE_KEY = process.env.POLL_INTERVAL_OVERRIDE_KEY || 'aiyra:poll_interval_ms';
 
 function safeLoad() {
   try {
@@ -154,6 +155,41 @@ export async function setLastPollTS(ts) {
     if (!client) return;
     if (!Number.isFinite(ts)) return;
     await client.set(LAST_POLL_TS_KEY, ts);
+  } catch (_) {
+    // ignore
+  }
+}
+
+export async function getPollIntervalOverride() {
+  try {
+    const client = getRedis();
+    if (!client) return null;
+    const v = await client.get(POLL_INTERVAL_OVERRIDE_KEY);
+    if (v === null || v === undefined) return null;
+    const n = Number(v);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+export async function setPollIntervalOverride(ms) {
+  try {
+    const client = getRedis();
+    if (!client) return;
+    const n = Number(ms);
+    if (!Number.isFinite(n) || n <= 0) return;
+    await client.set(POLL_INTERVAL_OVERRIDE_KEY, n);
+  } catch (_) {
+    // ignore
+  }
+}
+
+export async function clearPollIntervalOverride() {
+  try {
+    const client = getRedis();
+    if (!client) return;
+    await client.del(POLL_INTERVAL_OVERRIDE_KEY);
   } catch (_) {
     // ignore
   }
