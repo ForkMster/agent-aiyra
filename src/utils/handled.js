@@ -20,6 +20,7 @@ const DEFAULT_PATH = process.env.HANDLED_PATH || '/tmp/aiyra-handled.json';
 const MAX_ENTRIES = 5000;
 const TTL_MS = Number(process.env.HANDLED_TTL_MS || (14 * 24 * 60 * 60 * 1000)); // 14 days
 const TTL_SECONDS = Math.floor(TTL_MS / 1000);
+const LAST_PROCESSED_TS_KEY = process.env.HANDLED_LAST_TS_KEY || 'aiyra:last_cast_ts';
 
 function safeLoad() {
   try {
@@ -103,4 +104,30 @@ export function clearHandled() {
 
 export function getKVClient() {
   return getRedis();
+}
+
+export async function getLastProcessedTS() {
+  try {
+    const client = getRedis();
+    if (!client) return null;
+    const v = await client.get(LAST_PROCESSED_TS_KEY);
+    if (v === null || v === undefined) return null;
+    const n = Number(v);
+    if (Number.isFinite(n)) return n;
+    const d = Date.parse(String(v));
+    return Number.isFinite(d) ? d : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+export async function setLastProcessedTS(ts) {
+  try {
+    const client = getRedis();
+    if (!client) return;
+    if (!Number.isFinite(ts)) return;
+    await client.set(LAST_PROCESSED_TS_KEY, ts);
+  } catch (_) {
+    // ignore
+  }
 }

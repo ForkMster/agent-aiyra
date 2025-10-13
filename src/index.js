@@ -4,7 +4,7 @@ import FarcasterService from './services/farcaster.js';
 import logger from './utils/logger.js';
 import axios from 'axios';
 import { recordTrace, getTraces } from './utils/trace.js';
-import { isHandled, markHandled, getKVClient } from './utils/handled.js';
+import { isHandled, markHandled, getKVClient, getLastProcessedTS, setLastProcessedTS } from './utils/handled.js';
 import {
   handleWeatherIntent,
   handleZodiacVibe,
@@ -43,33 +43,86 @@ function getCastHash(cast) {
   );
 }
 
+// Try to derive a timestamp (ms since epoch) from various cast shapes
+function getCastTimestamp(cast) {
+  const candidates = [
+    cast?.timestamp,
+    cast?.cast?.timestamp,
+    cast?.published_at,
+    cast?.created_at,
+    cast?.data?.timestamp,
+    cast?.message?.timestamp
+  ];
+  for (const c of candidates) {
+    if (c === undefined || c === null) continue;
+    const num = Number(c);
+    if (Number.isFinite(num)) {
+      // Heuristic: seconds vs milliseconds
+      return num < 1e12 ? (num * 1000) : num;
+    }
+    const parsed = Date.parse(String(c));
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return NaN;
+}
+
 // Polling routine: fetch mentions, log start/end, and process new ones
 async function pollMentions() {
   const startTs = new Date().toISOString();
   logger.info(`[poll] start ${startTs}`);
   try {
     const casts = await getFarcaster().getRecentMentions();
-    const newCasts = [];
-    let skipped = 0;
-    for (const c of casts) {
-      const h = getCastHash(c);
-      const handled = await isHandled(h);
-      if (!handled) {
-        newCasts.push(c);
-      } else {
-        skipped++;
-      }
-    }
-    logger.info(`[poll] mentions total=${casts.length} new=${newCasts.length} skipped_handled=${skipped}`);
+    const lastTs = await getLastProcessedTS();
+    const timestamps = casts.map(c => ({ c, ts: getCastTimestamp(c), h: getCastHash(c) }));
 
-    // Optionally process new mentions
+    if (!Number.isFinite(lastTs)) {
+      // Initialize baseline to the newest cast timestamp to avoid backlog replies
+      const newest = timestamps
+        .map(x => x.ts)
+        .filter(t => Number.isFinite(t))
+        .sort((a, b) => b - a)[0];
+      if (Number.isFinite(newest)) {
+        await setLastProcessedTS(newest);
+        logger.info(`[poll] initialized baseline last_ts=${newest}`);
+        recordTrace(`[poll] initialized baseline last_ts=${newest}`, 'info');
+      } else {
+        logger.info(`[poll] no timestamps found to initialize baseline`);
+        recordTrace(`[poll] no timestamps found to initialize baseline`, 'info');
+      }
+      const endTs = new Date().toISOString();
+      logger.info(`[poll] end ${endTs}`);
+      return { total: casts.length, new: 0, initialized: true };
+    }
+
+    // Only consider casts newer than the last processed timestamp
+    const recent = timestamps.filter(x => Number.isFinite(x.ts) && x.ts > lastTs);
+    let skippedHandled = 0;
+    let skippedBacklog = casts.length - recent.length;
+    const newCasts = [];
+    for (const { c, h } of recent) {
+      const handled = await isHandled(h);
+      if (!handled) newCasts.push(c);
+      else skippedHandled++;
+    }
+    logger.info(`[poll] mentions total=${casts.length} new=${newCasts.length} skipped_backlog=${skippedBacklog} skipped_handled=${skippedHandled}`);
+
+    // Process new mentions
+    let maxTsProcessed = lastTs;
     for (const cast of newCasts) {
       await handleMention(cast);
+      const ts = getCastTimestamp(cast);
+      if (Number.isFinite(ts) && ts > maxTsProcessed) maxTsProcessed = ts;
+    }
+    // Update the last processed timestamp if we processed any
+    if (Number.isFinite(maxTsProcessed) && maxTsProcessed > lastTs) {
+      await setLastProcessedTS(maxTsProcessed);
+      logger.info(`[poll] updated last_ts=${maxTsProcessed}`);
+      recordTrace(`[poll] updated last_ts=${maxTsProcessed}`, 'info');
     }
 
     const endTs = new Date().toISOString();
     logger.info(`[poll] end ${endTs}`);
-    return { total: casts.length, new: newCasts.length };
+    return { total: casts.length, new: newCasts.length, skipped_backlog: skippedBacklog, skipped_handled: skippedHandled };
   } catch (error) {
     logger.error(`[poll] error ${error.message}`);
     return { error: error.message };
