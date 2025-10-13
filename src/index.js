@@ -4,7 +4,7 @@ import FarcasterService from './services/farcaster.js';
 import logger from './utils/logger.js';
 import axios from 'axios';
 import { recordTrace, getTraces } from './utils/trace.js';
-import { isHandled, markHandled, getKVClient, getLastProcessedTS, setLastProcessedTS } from './utils/handled.js';
+import { isHandled, markHandled, getKVClient, getLastProcessedTS, setLastProcessedTS, getLastPollTS, setLastPollTS } from './utils/handled.js';
 import {
   handleWeatherIntent,
   handleZodiacVibe,
@@ -70,6 +70,7 @@ function getCastTimestamp(cast) {
 async function pollMentions() {
   const startTs = new Date().toISOString();
   logger.info(`[poll] start ${startTs}`);
+  try { await setLastPollTS(Date.now()); } catch (_) {}
   try {
     const casts = await getFarcaster().getRecentMentions();
     const lastTs = await getLastProcessedTS();
@@ -368,6 +369,17 @@ app.get('/kv-check', async (req, res) => {
     } catch (e) {
       return res.status(200).json({ status: 'ok', kv: { connected: false, envFlags, error: e.message } });
     }
+  } catch (err) {
+    res.status(500).json({ status: 'error', error: err.message });
+  }
+});
+
+// Poll status diagnostics endpoint
+app.get('/poll-status', async (req, res) => {
+  try {
+    const lastPoll = await getLastPollTS();
+    const lastProcessed = await getLastProcessedTS();
+    res.status(200).json({ status: 'ok', poll: { lastPollTS: lastPoll, lastProcessedTS: lastProcessed } });
   } catch (err) {
     res.status(500).json({ status: 'error', error: err.message });
   }
