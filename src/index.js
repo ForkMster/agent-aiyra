@@ -70,6 +70,7 @@ function getCastTimestamp(cast) {
 async function pollMentions() {
   const startTs = new Date().toISOString();
   logger.info(`[poll] start ${startTs}`);
+  recordTrace(`[poll] start ${startTs}`, 'info');
   try { await setLastPollTS(Date.now()); } catch (_) {}
   try {
     const casts = await getFarcaster().getRecentMentions();
@@ -106,6 +107,7 @@ async function pollMentions() {
       else skippedHandled++;
     }
     logger.info(`[poll] mentions total=${casts.length} new=${newCasts.length} skipped_backlog=${skippedBacklog} skipped_handled=${skippedHandled}`);
+    recordTrace(`[poll] summary total=${casts.length} new=${newCasts.length} skipped_backlog=${skippedBacklog} skipped_handled=${skippedHandled}`, 'info');
 
     // Process new mentions
     let maxTsProcessed = lastTs;
@@ -126,6 +128,7 @@ async function pollMentions() {
     return { total: casts.length, new: newCasts.length, skipped_backlog: skippedBacklog, skipped_handled: skippedHandled };
   } catch (error) {
     logger.error(`[poll] error ${error.message}`);
+    recordTrace(`[poll] error ${error.message}`, 'error');
     return { error: error.message };
   }
 }
@@ -380,6 +383,17 @@ app.get('/poll-status', async (req, res) => {
     const lastPoll = await getLastPollTS();
     const lastProcessed = await getLastProcessedTS();
     res.status(200).json({ status: 'ok', poll: { lastPollTS: lastPoll, lastProcessedTS: lastProcessed } });
+  } catch (err) {
+    res.status(500).json({ status: 'error', error: err.message });
+  }
+});
+
+// Convenience endpoint to inspect last poll and processed timestamps
+app.get('/last-ts', async (req, res) => {
+  try {
+    const lastPoll = await getLastPollTS();
+    const lastProcessed = await getLastProcessedTS();
+    res.status(200).json({ status: 'ok', lastPollTS: lastPoll, lastProcessedTS: lastProcessed });
   } catch (err) {
     res.status(500).json({ status: 'error', error: err.message });
   }
