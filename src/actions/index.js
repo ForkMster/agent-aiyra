@@ -1,5 +1,7 @@
 import axios from 'axios';
 import logger from '../utils/logger.js';
+import { recordTrace } from '../utils/trace.js';
+import { chooseTone, applyWeatherTone, tonePrompt, detectTopicTone } from '../utils/tone.js';
 
 export async function handleWeatherIntent(text) {
   const apiKey = process.env.WEATHER_API_KEY;
@@ -26,7 +28,10 @@ export async function handleWeatherIntent(text) {
     const condition = data.weather?.[0]?.description;
     const feels = data.main?.feels_like;
 
-    return `${city} feels around ${Math.round(feels ?? temp ?? 0)}°C — ${condition}. The kind of weather that makes you think a little.`;
+    const tone = chooseTone({ weatherData: data, topicText: text });
+    recordTrace(`[tone] weather tone=${tone}`, 'info', { tone, city, condition, temp, feels });
+    const formatted = applyWeatherTone(city, feels ?? temp ?? 0, condition, tone);
+    return formatted;
   } catch (err) {
     logger.error("Weather fetch failed:", err.message || err);
     return "My weather senses got a bit cloudy — try again soon.";
@@ -81,7 +86,11 @@ function generateLocalFallback(context) {
 }
 
 export async function generateReply(context) {
-  const personality = `You are Aiyra — casual, Gen-Z-friendly, warm, and quote-like. Keep responses short (1–2 sentences), calm, and grounded. Be realistic and slightly poetic without trying too hard. Respond directly to the topic of the user's sentence: if it's a question, answer it; if it's a statement, offer a short, relevant thought. Avoid robotic phrasing, avoid hype, and skip long explanations. Minimal emojis (0–1), only if they truly add warmth.`;
+  const basePersonality = `You are Aiyra — casual, Gen-Z-friendly, warm, and quote-like. Keep responses short (1–2 sentences), calm, and grounded. Be realistic and slightly poetic without trying too hard. Respond directly to the topic of the user's sentence: if it's a question, answer it; if it's a statement, offer a short, relevant thought. Avoid robotic phrasing, avoid hype, and skip long explanations. Minimal emojis (0–2), only if they truly add warmth.`;
+  const toneName = chooseTone({ topicText: context });
+  const toneHint = tonePrompt(toneName);
+  recordTrace(`[tone] general tone=${toneName}`, 'info', { tone: toneName });
+  const personality = `${basePersonality}\nTone: ${toneHint}`;
   const prompt = `${personality}\n\nUser: ${context}\nAiyra:`;
   const ai = await generateWithOpenAI(prompt);
   return (ai && ai.trim()) || generateLocalFallback(context);
