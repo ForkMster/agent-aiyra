@@ -235,6 +235,19 @@ app.get('/test-reply', async (req, res) => {
   }
 });
 
+// Manual test endpoint to verify weather reply formatting and data accuracy
+app.get('/test-weather', async (req, res) => {
+  try {
+    const city = String(req.query.city || 'Tokyo').trim();
+    const text = `weather in ${city}`;
+    const message = await handleWeatherIntent(text);
+    res.status(200).json({ status: 'ok', city, message });
+  } catch (error) {
+    logger.error(`test-weather error: ${error.message}`);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Webhook endpoint for mentions
 app.post('/webhook', async (req, res) => {
   try {

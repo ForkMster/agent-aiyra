@@ -77,17 +77,18 @@ export function applyWeatherTone(city, temp, cond, name) {
   const emoji = pickEmoji(name);
   const t = Math.round(Number.isFinite(temp) ? temp : 0);
   const c = (cond || '').toLowerCase();
+  // Always lead with real data, then add tone flavor without em dashes
   switch (name) {
     case 'playful_genz':
-      return `${city}’s cooking at ${t}°C ${emoji || '🔥'} — SPF 50 and chill vibes only`;
+      return `${city} feels around ${t}°C, ${c}. ${emoji || '🔥'} Chill vibes only`;
     case 'calm_cozy':
-      return `Rain’s tapping on ${city}’s rooftops ${emoji || '🌧️'} — perfect for tea and long thoughts`;
+      return `${city} feels around ${t}°C, ${c}. Perfect for tea and slow moments ${emoji || '🌧️'}`;
     case 'witty_sarcastic':
-      return `${city}’s pretending it’s London today ${emoji || '🧣'} — dramatic skies and no royalty`;
+      return `${city} feels around ${t}°C, ${c}. ${emoji || '🧣'} Dramatic skies, bring the scarf`;
     case 'thoughtful_poetic':
-      return `${city}’s golden hour glow ${emoji || '✨'} — everything slows down a bit`;
+      return `${city} feels around ${t}°C, ${c}. The kind of weather that makes you think a little ${emoji || '✨'}`;
     default:
-      return `${city} feels around ${t}°C — ${c}. ${emoji || '✨'} Keep it easy.`;
+      return `${city} feels around ${t}°C, ${c}. ${emoji || '✨'} Easy day`;
   }
 }
 

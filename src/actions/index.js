@@ -34,7 +34,7 @@ export async function handleWeatherIntent(text) {
     return formatted;
   } catch (err) {
     logger.error("Weather fetch failed:", err.message || err);
-    return "My weather senses got a bit cloudy — try again soon.";
+    return "My weather senses got a bit cloudy, try again soon.";
   }
 }
 
