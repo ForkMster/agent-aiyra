@@ -3,7 +3,6 @@ Aiyra, your calm AI on Farcaster.
 Aiyra is a gentle AI companion on Farcaster, built with ElizaOS
 She reads your casts with patience, then replies with clarity and warmth — sharing weather, small fortunes, and gentle messages that make your feed feel peaceful.
 
-Live: `https://agent-aiyra-production-7299.up.railway.app`
 
 What She Can Do
 
