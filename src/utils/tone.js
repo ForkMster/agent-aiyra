@@ -8,7 +8,8 @@ const TONES = {
   thoughtful_poetic: { emojis: ['✨','🌇','🌙'], style: 'Thoughtful, slightly poetic, grounded. Keep it real.' },
   casual: { emojis: ['😄','🙂','✨'], style: 'Friendly, emoji-rich, relaxed and human.' },
   formal: { emojis: ['💼','✅'], style: 'Polite, efficient, professional tone.' },
-  reflective: { emojis: ['🤔','🌙','✨'], style: 'Calm, reflective, slightly philosophical.' }
+  reflective: { emojis: ['🤔','🌙','✨'], style: 'Calm, reflective, slightly philosophical.' },
+  crypto_trendy: { emojis: ['📈','🪙','🚀','✨'], style: 'Crypto-aware, friendly, simple. Trendy but calm; no financial advice.' }
 };
 
 function pickEmoji(name) {
@@ -32,9 +33,13 @@ function getLocalHourFromWeather(data) {
 
 export function detectTopicTone(text) {
   const t = String(text || '').toLowerCase();
+  const cryptoHints = [
+    'crypto','bitcoin','btc','eth','ethereum','sol','solana','ton','doge','shib','apt','sui','arb','arbitrum','op','optimism','token','price','market','chart','gas','fee','airdrop','staking','yield','defi','nft','protocol','chain','layer2','l2','layer1','l1','exchange','dex','cex','bull','bear'
+  ];
   const formalHints = ['meeting','plan','deadline','schedule','proposal','review','deliverable','client'];
   const reflectiveHints = ['life','meaning','think','thought','why','feeling','quiet','night'];
   const casualHints = ['haha','lol','bro','omg','right','totally','yeah','hey'];
+  if (cryptoHints.some(k => t.includes(k))) return 'crypto_trendy';
   if (formalHints.some(k => t.includes(k))) return 'formal';
   if (reflectiveHints.some(k => t.includes(k))) return 'reflective';
   if (casualHints.some(k => t.includes(k))) return 'casual';
@@ -69,27 +74,34 @@ export function selectWeatherTone(data) {
 
 export function tonePrompt(name) {
   const base = TONES[name]?.style || 'Stay human and grounded.';
-  const emoji = pickEmoji(name);
-  return `${base} Use 0–2 fitting emojis like ${emoji || '✨'} when natural.`;
+  const extra = name === 'crypto_trendy'
+    ? ' Keep it friendly, on-topic, and clearly not financial advice.'
+    : '';
+  return `${base}.${extra} Use common words. Place one emoji at the end only.`;
 }
 
 export function applyWeatherTone(city, temp, cond, name) {
-  const emoji = pickEmoji(name);
   const t = Math.round(Number.isFinite(temp) ? temp : 0);
   const c = (cond || '').toLowerCase();
-  // Always lead with real data, then add tone flavor without em dashes
+  // Always lead with real data, then add simple tone flavor. No em dashes. Emoji at end only.
+  let base;
   switch (name) {
     case 'playful_genz':
-      return `${city} feels around ${t}°C, ${c}. ${emoji || '🔥'} Chill vibes only`;
+      base = `${city} feels around ${t}°C, ${c}. Easy vibes today`;
+      break;
     case 'calm_cozy':
-      return `${city} feels around ${t}°C, ${c}. Perfect for tea and slow moments ${emoji || '🌧️'}`;
+      base = `${city} feels around ${t}°C, ${c}. Cozy and gentle`;
+      break;
     case 'witty_sarcastic':
-      return `${city} feels around ${t}°C, ${c}. ${emoji || '🧣'} Dramatic skies, bring the scarf`;
+      base = `${city} feels around ${t}°C, ${c}. Better bring a scarf`;
+      break;
     case 'thoughtful_poetic':
-      return `${city} feels around ${t}°C, ${c}. The kind of weather that makes you think a little ${emoji || '✨'}`;
+      base = `${city} feels around ${t}°C, ${c}. Quiet and steady`;
+      break;
     default:
-      return `${city} feels around ${t}°C, ${c}. ${emoji || '✨'} Easy day`;
+      base = `${city} feels around ${t}°C, ${c}.`;
   }
+  return finalizeReply(base, name);
 }
 
 export function chooseTone({ weatherData, topicText }) {
@@ -100,4 +112,20 @@ export function chooseTone({ weatherData, topicText }) {
   else name = detectTopicTone(topicText);
   recordTrace(`[tone] selected ${name || 'unknown'}`, 'info', { tone: name || 'unknown' });
   return name || 'casual';
+}
+
+// Normalize any reply to keep emoji at the end, avoid em dashes, and simplify spacing.
+export function finalizeReply(text, toneName = 'casual') {
+  let cleaned = String(text || '').trim();
+  // Replace em/en dashes with commas
+  cleaned = cleaned.replace(/[—–]+/g, ',');
+  // Remove mid-sentence emojis
+  cleaned = cleaned.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{1F900}-\u{1F9FF}\u{1F600}-\u{1F64F}]/gu, '');
+  // Collapse whitespace
+  cleaned = cleaned.replace(/\s{2,}/g, ' ').trim();
+  // Ensure punctuation looks natural
+  cleaned = cleaned.replace(/\s*\.,/g, '.');
+  // Append a single emoji at the end
+  const emoji = pickEmoji(toneName) || '✨';
+  return `${cleaned} ${emoji}`.trim();
 }

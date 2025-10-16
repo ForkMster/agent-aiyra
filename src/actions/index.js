@@ -1,7 +1,7 @@
 import axios from 'axios';
 import logger from '../utils/logger.js';
 import { recordTrace } from '../utils/trace.js';
-import { chooseTone, applyWeatherTone, tonePrompt, detectTopicTone } from '../utils/tone.js';
+import { chooseTone, applyWeatherTone, tonePrompt, detectTopicTone, finalizeReply } from '../utils/tone.js';
 
 export async function handleWeatherIntent(text) {
   const apiKey = process.env.WEATHER_API_KEY;
@@ -86,59 +86,60 @@ function generateLocalFallback(context) {
 }
 
 export async function generateReply(context) {
-  const basePersonality = `You are Aiyra — casual, Gen-Z-friendly, warm, and quote-like. Keep responses short (1–2 sentences), calm, and grounded. Be realistic and slightly poetic without trying too hard. Respond directly to the topic of the user's sentence: if it's a question, answer it; if it's a statement, offer a short, relevant thought. Avoid robotic phrasing, avoid hype, and skip long explanations. Minimal emojis (0–2), only if they truly add warmth.`;
+  const basePersonality = `You are Aiyra — calm, friendly, and human. Use simple, common words. Keep replies short (1–2 sentences), clear, and on-topic. No em dashes. Avoid abstract, overly poetic, or critical phrasing. Respond directly to the user's request: if it's a question, answer it; if it's a statement, offer a short, relevant thought. For crypto topics, keep it friendly and trendy, but clearly not financial advice. Add exactly one emoji at the END of the reply, never mid-sentence.`;
   const toneName = chooseTone({ topicText: context });
   const toneHint = tonePrompt(toneName);
   recordTrace(`[tone] general tone=${toneName}`, 'info', { tone: toneName });
   const personality = `${basePersonality}\nTone: ${toneHint}`;
   const prompt = `${personality}\n\nUser: ${context}\nAiyra:`;
   const ai = await generateWithOpenAI(prompt);
-  return (ai && ai.trim()) || generateLocalFallback(context);
+  const raw = (ai && ai.trim()) || generateLocalFallback(context);
+  return finalizeReply(raw, toneName);
 }
 
 export function handleZodiacVibe(sign) {
   const vibes = {
-    "♈": "Aries, your spark is soft but steady — let it lead.",
-    "♉": "Taurus, simple moments feel rich today — stay grounded.",
-    "♊": "Gemini, your thoughts are light and clear — share gently.",
-    "♋": "Cancer, move with the moon’s patience — soft steps." ,
-    "♌": "Leo, warm and calm — power without the noise.",
-    "♍": "Virgo, details turn into poetry today — keep it simple.",
-    "♎": "Libra, balance feels easy — choose the lighter path.",
-    "♏": "Scorpio, quiet depth — let curiosity guide you.",
-    "♐": "Sagittarius, aim with ease — your horizon looks kind.",
-    "♑": "Capricorn, steady climbs — gentle wins count too.",
-    "♒": "Aquarius, calm waves — ideas land where they should.",
-    "♓": "Pisces, drift with intention — imagination with roots."
+    "♈": "Aries, your spark is steady and kind, let it lead.",
+    "♉": "Taurus, simple moments feel rich today, stay grounded.",
+    "♊": "Gemini, your thoughts are light and clear, share gently.",
+    "♋": "Cancer, move with patience and care, soft steps.",
+    "♌": "Leo, warm and calm, power without noise.",
+    "♍": "Virgo, details feel easy today, keep it simple.",
+    "♎": "Libra, balance feels natural, choose the lighter path.",
+    "♏": "Scorpio, quiet depth, let curiosity guide you.",
+    "♐": "Sagittarius, aim with ease, your horizon looks kind.",
+    "♑": "Capricorn, steady climbs, gentle wins count too.",
+    "♒": "Aquarius, calm waves, ideas land where they should.",
+    "♓": "Pisces, drift with intention, imagination with roots."
   };
-  
-  return vibes[sign] || "The stars are writing you a personal note. Check back in a moment.";
+  const msg = vibes[sign] || "The stars are writing you a personal note. Check back in a moment.";
+  return finalizeReply(msg, 'reflective');
 }
 
 export function handleFortuneBloom() {
   const fortunes = [
-    "Your energy blooms where your attention flows.",
-    "A gentle breeze carries an unexpected blessing.",
-    "The quietest moments hold the loudest magic.",
-    "Like moonlight on water, your path will shimmer clear.",
-    "Possibilities take root when you choose them on purpose.",
-    "Your kindness creates ripples that reach further than you think.",
-    "Sometimes the softest whispers hold the strongest truth.",
-    "A small surprise is waiting where you least expect it."
+    "Your energy blooms where your attention goes.",
+    "A gentle breeze may carry a nice surprise.",
+    "Quiet moments often hold the clearest magic.",
+    "Your path will feel clearer step by step.",
+    "Good things take root when you choose them.",
+    "Kindness travels further than you think.",
+    "Soft truths can be the strongest.",
+    "A small surprise might be nearby."
   ];
-  
-  return fortunes[Math.floor(Math.random() * fortunes.length)];
+  const msg = fortunes[Math.floor(Math.random() * fortunes.length)];
+  return finalizeReply(msg, 'casual');
 }
 
 export function generateDailyGreeting() {
   const greetings = [
-    "Today feels soft — let it be simple.",
+    "Today feels soft, let it be simple.",
     "A calm day is a good day.",
-    "Keep it light; move with ease.",
+    "Keep it light, move with ease.",
     "Quiet energy, steady steps.",
     "Gentle pace, clear mind.",
     "Small moments make the vibe."
   ];
-  
-  return greetings[Math.floor(Math.random() * greetings.length)];
+  const msg = greetings[Math.floor(Math.random() * greetings.length)];
+  return finalizeReply(msg, 'casual');
 }
