@@ -82,26 +82,70 @@ export function tonePrompt(name) {
 
 export function applyWeatherTone(city, temp, cond, name) {
   const t = Math.round(Number.isFinite(temp) ? temp : 0);
-  const c = (cond || '').toLowerCase();
-  // Always lead with real data, then add simple tone flavor. No em dashes. Emoji at end only.
-  let base;
-  switch (name) {
-    case 'playful_genz':
-      base = `${city} feels around ${t}°C, ${c}. Easy vibes today`;
-      break;
-    case 'calm_cozy':
-      base = `${city} feels around ${t}°C, ${c}. Cozy and gentle`;
-      break;
-    case 'witty_sarcastic':
-      base = `${city} feels around ${t}°C, ${c}. Better bring a scarf`;
-      break;
-    case 'thoughtful_poetic':
-      base = `${city} feels around ${t}°C, ${c}. Quiet and steady`;
-      break;
-    default:
-      base = `${city} feels around ${t}°C, ${c}.`;
+  const raw = String(cond || '').trim();
+  const c = raw.toLowerCase();
+
+  function pickWeatherEmoji(tempC, condLower) {
+    const cold = tempC <= 5;
+    const hot = tempC >= 28;
+    const isSnow = condLower.includes('snow');
+    const isRain = condLower.includes('rain') || condLower.includes('drizzle');
+    const isThunder = condLower.includes('thunder') || condLower.includes('storm');
+    const isFog = condLower.includes('fog') || condLower.includes('mist') || condLower.includes('haze');
+    const isCloud = condLower.includes('cloud');
+    const isClear = condLower.includes('clear') || condLower.includes('sun') || condLower.includes('sky');
+
+    if (isThunder) return '⚡';
+    if (isSnow) return '❄️';
+    if (isRain) return '☔';
+    if (isFog) return '🌫️';
+    if (cold && (isClear || isCloud)) return '🧣';
+    if (isCloud) return '☁️';
+    if (isClear) return hot ? '🌞' : '☀️';
+    return '✨';
   }
-  return finalizeReply(base, name);
+
+  function buildSuggestion(tempC, condLower) {
+    const cold = tempC <= 5;
+    const chilly = tempC > 5 && tempC <= 12;
+    const mild = tempC > 12 && tempC <= 20;
+    const warm = tempC > 20 && tempC <= 27;
+    const hot = tempC >= 28;
+    const isSnow = condLower.includes('snow');
+    const isRain = condLower.includes('rain') || condLower.includes('drizzle');
+    const isThunder = condLower.includes('thunder') || condLower.includes('storm');
+    const isFog = condLower.includes('fog') || condLower.includes('mist') || condLower.includes('haze');
+    const isCloud = condLower.includes('cloud');
+    const isClear = condLower.includes('clear') || condLower.includes('sun') || condLower.includes('sky');
+
+    if (isThunder) return 'It’s stormy, best to stay indoors.';
+    if (isSnow) return 'It’s snowy and cold, bundle up.';
+    if (isRain) return condLower.includes('drizzle')
+      ? 'Light rain today, a cozy cafe could be nice.'
+      : 'It’s rainy, grab an umbrella.';
+    if (isFog) return 'It’s foggy, move with care.';
+    if (isCloud) {
+      if (cold) return 'Cloudy and cold, bring layers.';
+      if (chilly) return 'Cloudy and cool, a light jacket helps.';
+      return 'Cloudy and soft, good for a calm stroll.';
+    }
+    if (isClear) {
+      if (cold) return 'It’s pretty chilly and clear, better take a scarf!';
+      if (chilly) return 'It’s cool and clear, a light jacket helps.';
+      if (mild) return 'It’s calm and clear, perfect for a walk outside.';
+      if (warm) return 'Warm and clear, good time to be outside.';
+      if (hot) return 'It’s hot and clear, stay cool and hydrated.';
+    }
+    if (hot) return 'It’s hot, find shade and hydrate.';
+    if (cold) return 'It’s very cold, bundle up well.';
+    return 'Feels simple and steady, enjoy your day.';
+  }
+
+  const main = `${city} feels around ${t}°C, ${raw || c}.`;
+  const suggestion = buildSuggestion(t, c);
+  const emoji = pickWeatherEmoji(t, c);
+  const combined = `${main} ${suggestion}`;
+  return finalizeReply(combined, name, emoji);
 }
 
 export function chooseTone({ weatherData, topicText }) {
@@ -115,7 +159,7 @@ export function chooseTone({ weatherData, topicText }) {
 }
 
 // Normalize any reply to keep emoji at the end, avoid em dashes, and simplify spacing.
-export function finalizeReply(text, toneName = 'casual') {
+export function finalizeReply(text, toneName = 'casual', overrideEmoji = null) {
   let cleaned = String(text || '').trim();
   // Replace em/en dashes with commas
   cleaned = cleaned.replace(/[—–]+/g, ',');
@@ -126,6 +170,6 @@ export function finalizeReply(text, toneName = 'casual') {
   // Ensure punctuation looks natural
   cleaned = cleaned.replace(/\s*\.,/g, '.');
   // Append a single emoji at the end
-  const emoji = pickEmoji(toneName) || '✨';
+  const emoji = overrideEmoji || pickEmoji(toneName) || '✨';
   return `${cleaned} ${emoji}`.trim();
 }
