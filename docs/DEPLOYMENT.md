@@ -81,6 +81,26 @@ These endpoints help verify the deployment and debug behavior.
 - `GET /test-reply`: Publish a test cast and reply
 - `GET /test-weather?city=Tokyo`: Generate a weather reply for the given city
 
+## Weather Reply Format and Emoji Rule
+
+To keep Aiyra’s weather replies calm and human-like, the format is consistent and simple:
+
+- First sentence: `"<City> feels around <temp>°C, <condition>."`
+- Second sentence: A friendly, natural follow-up describing how it feels or a gentle suggestion (context-aware by temperature and condition).
+- Emoji: Exactly one emoji appended at the end, chosen based on weather when possible (e.g., `☔` rain, `❄️` snow, `🧣` cold, `☀️/🌞` clear and warm, `⚡` storm, `🌫️` fog). No emojis mid-sentence.
+
+Examples:
+
+- `Kyoto feels around 17°C, clear sky. It’s calm and clear, perfect for a walk outside. ✨`
+- `Seattle feels around 3°C, clear sky. It’s pretty chilly and clear, better take a scarf! 🧣`
+- `London feels around 12°C, drizzle. Light rain today, a cozy cafe could be nice. ☔`
+
+Implementation notes:
+
+- Logic lives in `src/utils/tone.js` (`applyWeatherTone` builds the two-sentence message; `finalizeReply` enforces the single emoji at the end and removes mid-sentence emojis).
+- `finalizeReply` supports an override emoji for weather so templates should not add extra emojis.
+- Keep language simple, avoid em dashes, and prefer clear, grounded phrasing.
+
 ## Railway Notes
 
 - Ensure `PORT=8080` is set; Railway maps this automatically
