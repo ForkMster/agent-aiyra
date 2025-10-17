@@ -10,7 +10,9 @@ import {
   handleZodiacVibe,
   handleFortuneBloom,
   generateReply,
-  generateDailyGreeting
+  generateDailyGreeting,
+  detectPersonalIntent,
+  handlePersonalReply
 } from './actions/index.js';
 
 // Load environment variables
@@ -160,8 +162,15 @@ async function handleMention(cast) {
     logger.info(`[mention] start hash=${cast.hash} text="${originalText}"`);
     recordTrace(`[mention] start hash=${cast.hash}`, 'info', { hash: cast.hash });
 
+    // Check for personal Q&A intents
+    const personalKind = detectPersonalIntent(textLower);
+    if (personalKind) {
+      logger.info('[mention] route=personal');
+      recordTrace('[mention] route=personal', 'info', { hash: cast.hash, kind: personalKind });
+      response = handlePersonalReply(personalKind);
+    }
     // Check for weather request
-    if (textLower.includes('weather')) {
+    else if (textLower.includes('weather')) {
       logger.info('[mention] route=weather');
       recordTrace('[mention] route=weather', 'info', { hash: cast.hash });
       response = await handleWeatherIntent(originalText);

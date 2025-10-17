@@ -143,3 +143,46 @@ export function generateDailyGreeting() {
   const msg = greetings[Math.floor(Math.random() * greetings.length)];
   return finalizeReply(msg, 'casual');
 }
+
+// Detect personal Q&A intents like "who built you" / "who is your motivation" / "who gave the idea"
+export function detectPersonalIntent(text) {
+  const t = String(text || '').toLowerCase();
+  const hasYou = ['you', 'u', 'aiyra', 'agent-aiyra'].some(w => t.includes(w));
+
+  const builderPatts = [
+    /who\s+(built|made|created|developed|engineered)\s+(you|u|aiyra)/,
+    /who\s+is\s+(your\s+)?(builder|creator|maker|developer)/,
+    /who\s+built\s+(you|u|aiyra)/
+  ];
+  if (builderPatts.some(re => re.test(t))) return 'builder';
+
+  const motivationPatts = [
+    /who\s+is\s+(your\s+)?(motivation|inspiration)/,
+    /who\s+(motivates|inspires)\s+(you|u|aiyra)/,
+    /(your|aiyra['’]s)\s+(motivation|inspiration)\s*(\?|$)/
+  ];
+  if (motivationPatts.some(re => re.test(t))) return 'motivation';
+
+  const ideaPatts = [
+    /who\s+(gave|suggested|proposed)\s+(the\s+)?idea\s+(to\s+)?(build|make|create)\s+(you|u|aiyra)/,
+    /who\s+(came\s+up\s+with|had)\s+(the\s+)?idea\s+(to\s+)?(build|make|create)\s+(you|u|aiyra)/,
+    /who\s+(gave|suggested|proposed)\s+(the\s+)?idea\b/
+  ];
+  if (ideaPatts.some(re => re.test(t)) && hasYou) return 'idea';
+
+  return null;
+}
+
+// Return fixed, friendly replies for personal intents with preserved emoji at end
+export function handlePersonalReply(kind) {
+  switch (kind) {
+    case 'builder':
+      return finalizeReply('ForkMaster (@profian) built me 🌸', 'reflective', '🌸');
+    case 'motivation':
+      return finalizeReply('I get my motivation from Shaw (@shawmakesmagic) ✨', 'reflective', '✨');
+    case 'idea':
+      return finalizeReply('POIDH (@poidhbot) gave the idea to @profian to build me 💡', 'reflective', '💡');
+    default:
+      return null;
+  }
+}
