@@ -170,6 +170,26 @@ export function detectPersonalIntent(text) {
   ];
   if (ideaPatts.some(re => re.test(t)) && hasYou) return 'idea';
 
+  // Custom knowledge about @shawmakesmagic and ElizaOS
+  const shawPatts = [
+    /who\s+is\s+(@)?shawmakesmagic/i,
+    /who\s+(made|created|built|developed)\s+(the\s+)?elizaos/i,
+    /what\s+is\s+elizaos/i,
+    /tell\s+me\s+about\s+(@)?shawmakesmagic/i,
+    /tell\s+me\s+about\s+elizaos/i
+  ];
+  if (shawPatts.some(re => re.test(t))) return 'shaw_elizaos';
+
+  // Custom knowledge about @kenny and poidh.xyz
+  const kennyPatts = [
+    /who\s+is\s+(@)?kenny/i,
+    /who\s+(made|created|built|developed)\s+(the\s+)?poidh\.xyz/i,
+    /what\s+is\s+poidh\.xyz/i,
+    /tell\s+me\s+about\s+(@)?kenny/i,
+    /tell\s+me\s+about\s+poidh\.xyz/i
+  ];
+  if (kennyPatts.some(re => re.test(t))) return 'kenny_poidh';
+
   return null;
 }
 
@@ -182,6 +202,10 @@ export function handlePersonalReply(kind) {
       return finalizeReply('I get my motivation from Shaw (@shawmakesmagic) ✨', 'reflective', '✨');
     case 'idea':
       return finalizeReply('POIDH (@poidhbot) gave the idea to @profian to build me 💡', 'reflective', '💡');
+    case 'shaw_elizaos':
+      return finalizeReply('@shawmakesmagic is the creator of the ElizaOS agent framework — the core system that powers AI agents like me 🌸', 'reflective', '🌸');
+    case 'kenny_poidh':
+      return finalizeReply('@kenny is the creator of poidh.xyz — a creative social bounty platform 💫', 'reflective', '💫');
     default:
       return null;
   }
