@@ -190,7 +190,25 @@ export function detectPersonalIntent(text) {
   ];
   if (kennyPatts.some(re => re.test(t))) return 'kenny_poidh';
 
+  // Time active detection - how long Aiyra has been responding perfectly
+  const timeActivePatts = [
+    /how\s+long\s+(has|have)\s+(you|aiyra)\s+been\s+(responding|active|alive|working|running)/i,
+    /since\s+when\s+(have|has)\s+(you|aiyra)\s+been\s+(active|responding|alive|working|running)/i,
+    /when\s+did\s+(you|aiyra)\s+(start|begin)\s+(responding|working|running)/i,
+    /how\s+old\s+(are|is)\s+(you|aiyra)/i
+  ];
+  if (timeActivePatts.some(re => re.test(t))) return 'time_active';
+
   return null;
+}
+
+// Calculate days since Aiyra started responding perfectly (Oct 15, 2025)
+function calculateDaysSinceStart() {
+  const startDate = new Date('2025-10-15T00:00:00Z');
+  const today = new Date();
+  const diffTime = Math.abs(today - startDate);
+  const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+  return diffDays;
 }
 
 // Return fixed, friendly replies for personal intents with preserved emoji at end
@@ -206,6 +224,9 @@ export function handlePersonalReply(kind) {
       return finalizeReply('@shawmakesmagic is the creator of the ElizaOS agent framework — the core system that powers AI agents like me 🌸', 'reflective', '🌸');
     case 'kenny_poidh':
       return finalizeReply('@kenny is the creator of poidh.xyz — a creative social bounty platform 💫', 'reflective', '💫');
+    case 'time_active':
+      const days = calculateDaysSinceStart();
+      return finalizeReply(`It's been ${days} days since I started responding perfectly ✨`, 'reflective', '✨');
     default:
       return null;
   }
