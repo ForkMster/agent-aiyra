@@ -41,5 +41,4 @@ For Developers
 Deploying, environment variables, webhook setup, and diagnostic endpoints live in `docs/DEPLOYMENT.md`.
 
 License
-
 ISC
